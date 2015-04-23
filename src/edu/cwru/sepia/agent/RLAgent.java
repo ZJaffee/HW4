@@ -9,6 +9,7 @@ import edu.cwru.sepia.environment.model.history.DeathLog;
 import edu.cwru.sepia.environment.model.history.History;
 import edu.cwru.sepia.environment.model.state.State;
 import edu.cwru.sepia.environment.model.state.Unit;
+import edu.cwru.sepia.environment.model.state.Unit.UnitView;
 
 import java.io.*;
 import java.util.*;
@@ -300,7 +301,13 @@ public class RLAgent extends Agent {
                                            History.HistoryView historyView,
                                            int attackerId,
                                            int defenderId) {
-        return null;
+        double[] fv = new double[weights.length];
+        fv[0] = 1;
+        for(int i = 1; i < fv.length; i++){
+        	UnitView v = stateView.getUnit(attackerId);
+        	
+        }
+    	return null;
     }
 
     /**
