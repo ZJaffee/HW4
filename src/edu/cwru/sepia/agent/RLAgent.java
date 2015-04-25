@@ -27,8 +27,8 @@ public class RLAgent extends Agent {
     /**
      * List of your footmen and your enemies footmen
      */
-    private List<Integer> myFootmen;
-    private List<Integer> enemyFootmen;
+    private Set<Integer> myFootmen;
+    private Set<Integer> enemyFootmen;
 
     /**
      * Convenience variable specifying enemy agent number. Use this whenever referring
@@ -39,7 +39,7 @@ public class RLAgent extends Agent {
     /**
      * Set this to whatever size your feature vector is.
      */
-    public static final int NUM_FEATURES = 5;
+    public static final int NUM_FEATURES = 3;
 
     /** Use this random number generator for your epsilon exploration. When you submit we will
      * change this seed so make sure that your agent works for more than the default seed.
@@ -106,7 +106,7 @@ public class RLAgent extends Agent {
         // You will need to add code to check if you are in a testing or learning episode
 
         // Find all of your units
-        myFootmen = new LinkedList<>();
+        myFootmen = new HashSet<>();
         for (Integer unitId : stateView.getUnitIds(playernum)) {
             Unit.UnitView unit = stateView.getUnit(unitId);
 
@@ -120,7 +120,7 @@ public class RLAgent extends Agent {
         }
 
         // Find all of the enemy units
-        enemyFootmen = new LinkedList<>();
+        enemyFootmen = new HashSet<>();
         for (Integer unitId : stateView.getUnitIds(ENEMY_PLAYERNUM)) {
             Unit.UnitView unit = stateView.getUnit(unitId);
 
@@ -176,6 +176,7 @@ public class RLAgent extends Agent {
         	ret.put(footmanId, Action.createCompoundAttack(footmanId, selectAction(stateView, historyView, footmanId)));
         	cumulativeReward.put(footmanId, -0.1);
         }
+        System.out.println(ret);
     	return ret;
     }
 
@@ -220,6 +221,9 @@ public class RLAgent extends Agent {
         if(!myFootmen.contains(footmanId)){
         	previousFeatures.remove(footmanId);
         	cumulativeReward.remove(footmanId);
+        	for(Set<Integer> myUnits : beingAttackedBy.values()){
+        		myUnits.remove(footmanId);
+        	}
         }
     }
 
@@ -302,7 +306,7 @@ public class RLAgent extends Agent {
     			enemyFootmen.remove(deadEnemy);
     			for(Integer myUnit : beingAttackedBy.get(deadEnemy)){
     				//punishes footmen teaming up on others -- should make sure there is a feature to offset this
-    				cumulativeReward.put(myUnit, cumulativeReward.get(myUnit) + (100.0/beingAttackedBy.get(myUnit).size()));
+    				cumulativeReward.put(myUnit, cumulativeReward.get(myUnit) + (100.0/beingAttackedBy.get(deadEnemy).size()));
         			inactiveUnits.add(myUnit);
     			}
     			beingAttackedBy.remove(deadEnemy);
@@ -314,9 +318,10 @@ public class RLAgent extends Agent {
     			int myUnit = damageLog.getDefenderID();
     			cumulativeReward.put(myUnit, cumulativeReward.get(myUnit) - damageLog.getDamage());
     		}else{
-    			int enemyUnit = damageLog.getDefenderID();
+    			int enemyUnit = damageLog.getDefenderID();;
     			for(Integer myUnit : beingAttackedBy.get(enemyUnit)){
-    				cumulativeReward.put(myUnit, cumulativeReward.get(myUnit) + (damageLog.getDamage()*1.0/beingAttackedBy.get(myUnit).size()));
+    				System.out.println(cumulativeReward.get(myUnit));
+    				cumulativeReward.put(myUnit, cumulativeReward.get(myUnit) + (damageLog.getDamage()*1.0/beingAttackedBy.get(enemyUnit).size()));
     			}
     		}
     	 }
@@ -328,6 +333,9 @@ public class RLAgent extends Agent {
     			for(Set<Integer> attacking : beingAttackedBy.values()){
     				attacking.remove(result.getKey());
     			}
+    			if(myFootmen.contains(result.getKey())){
+    				inactiveUnits.add(result.getKey());
+    			}
     		}
     	}
     	
@@ -338,13 +346,13 @@ public class RLAgent extends Agent {
     	return inactiveUnits;
     }
     
-    public double dotProduct(Double[] a, Double[] oldFeatures){
-		if(a.length != oldFeatures.length){
+    public double dotProduct(Double[] a, Double[] b){
+		if(a.length != b.length){
 			throw new IllegalArgumentException("The dimensions have to be equal!");
 		}
 		double sum = 0;
 		for(int i = 0; i < a.length; i++){
-			sum += a[i] * oldFeatures[i];
+			sum += a[i] * b[i];
 		}
 		return sum;
 	}
@@ -397,8 +405,8 @@ public class RLAgent extends Agent {
         
         UnitView at = stateView.getUnit(attackerId);
         UnitView df = stateView.getUnit(defenderId);
-        fv[1] = (double) (df.getHP() - at.getHP());
-        fv[2] = (double) Math.max(df.getXPosition() - at.getXPosition(),df.getYPosition() - at.getYPosition());
+        fv[1] = ((double) at.getHP())/(df.getHP() + at.getHP());
+        fv[2] = (double) Math.max(df.getXPosition() - at.getXPosition(),df.getYPosition() - at.getYPosition()) + 1000;
         
     	return fv;
     }
