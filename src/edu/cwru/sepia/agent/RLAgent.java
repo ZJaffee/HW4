@@ -206,18 +206,20 @@ public class RLAgent extends Agent {
      * @param footmanId The footman we are updating the weights for
      * @return The updated weight vector.
      */
-    public void updateWeights(int footmanId) {
+    public void updateWeights(State.StateView stateView, History.HistoryView historyView, int footmanId) {
         Double[] oldFeatures = previousFeatures.get(footmanId);
         double actualReward = cumulativeReward.get(footmanId);
         double qVal = dotProduct(weights, oldFeatures);
         
-        double difference = actualReward - qVal;
+        double predictedQ = myFootmen.contains(footmanId) ? calcQValue(stateView, historyView, footmanId, selectAction(stateView, historyView, footmanId)) : 0;
+        double LVal = -(actualReward - qVal + gamma*predictedQ);
+        System.out.println("Old weights: "+Arrays.toString(weights));
         
         for(int i = 1; i < weights.length; i++){
         	//not sure if this is right
-        	weights[i] += difference/oldFeatures[i];
+        	weights[i] -= LVal/oldFeatures[i];
         }
-        
+        System.out.println("New weights: "+Arrays.toString(weights));
         if(!myFootmen.contains(footmanId)){
         	previousFeatures.remove(footmanId);
         	cumulativeReward.remove(footmanId);
@@ -294,12 +296,14 @@ public class RLAgent extends Agent {
     public Set<Integer> calcRewardsAndGetInactiveUnits(State.StateView stateView, History.HistoryView historyView) {
     	int lastTurnNumber = stateView.getTurnNumber() -1;
     	Set<Integer> inactiveUnits = new HashSet<Integer>();
+    	Set<Integer> myDead = new HashSet<Integer>();
     	Set<Integer> hadEvent = new HashSet<Integer>();
     	for(DeathLog deathLog : historyView.getDeathLogs(lastTurnNumber)) {
     		if(deathLog.getController() == playernum){
     			int unitId = deathLog.getDeadUnitID();
     			hadEvent.add(unitId);
     			myFootmen.remove(deathLog.getDeadUnitID());
+    			myDead.add(deathLog.getDeadUnitID());
     			cumulativeReward.put(unitId, cumulativeReward.get(unitId) - 100);
     		}else{
     			int deadEnemy = deathLog.getDeadUnitID();
@@ -340,8 +344,10 @@ public class RLAgent extends Agent {
     	}
     	
     	for(Integer unitHadEvent : hadEvent){
-    		updateWeights(unitHadEvent);
+    		updateWeights(stateView, historyView, unitHadEvent);
     	}
+    	
+    	inactiveUnits.removeAll(myDead);
     	
     	return inactiveUnits;
     }
@@ -411,6 +417,7 @@ public class RLAgent extends Agent {
         fv[1] = (atHP)/(atHP + dfHP);
         
         if(atHP == 0 || dfHP == 0){
+        	System.out.println("DEAD");
         	fv[2] = 0.0;
         }else{
         	fv[2] = (double) Math.max(df.getXPosition() - at.getXPosition(),df.getYPosition() - at.getYPosition()) + 1000;
