@@ -187,7 +187,7 @@ public class RLAgent extends Agent {
     	for(int i = 0; i< oldWeights.length; i++){
     		d[i] = oldWeights[i]*oldFeatures[i]+weights[i];
     	}
-    	
+    	//fix this to be correct
     	return d;
     }
 
@@ -301,13 +301,15 @@ public class RLAgent extends Agent {
                                            History.HistoryView historyView,
                                            int attackerId,
                                            int defenderId) {
-        double[] fv = new double[weights.length];
+        double[] fv = new double[3];
         fv[0] = 1;
-        for(int i = 1; i < fv.length; i++){
-        	UnitView v = stateView.getUnit(attackerId);
-        	
-        }
-    	return null;
+        
+        UnitView at = stateView.getUnit(attackerId);
+        UnitView df = stateView.getUnit(defenderId);
+        fv[1] = df.getHP() - at.getHP();
+        fv[2] = Math.max(df.getXPosition() - at.getXPosition(),df.getYPosition() - at.getYPosition());
+        
+    	return fv;
     }
 
     /**
