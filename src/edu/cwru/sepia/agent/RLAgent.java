@@ -309,7 +309,7 @@ public class RLAgent extends Agent {
     				cumulativeReward.put(myUnit, cumulativeReward.get(myUnit) + (100.0/beingAttackedBy.get(deadEnemy).size()));
         			inactiveUnits.add(myUnit);
     			}
-    			beingAttackedBy.remove(deadEnemy);
+    			//beingAttackedBy.remove(deadEnemy);
     		}
     	}
     	
@@ -320,7 +320,7 @@ public class RLAgent extends Agent {
     		}else{
     			int enemyUnit = damageLog.getDefenderID();;
     			for(Integer myUnit : beingAttackedBy.get(enemyUnit)){
-    				System.out.println(cumulativeReward.get(myUnit));
+    				//System.out.println(cumulativeReward.get(myUnit));
     				cumulativeReward.put(myUnit, cumulativeReward.get(myUnit) + (damageLog.getDamage()*1.0/beingAttackedBy.get(enemyUnit).size()));
     			}
     		}
@@ -405,8 +405,16 @@ public class RLAgent extends Agent {
         
         UnitView at = stateView.getUnit(attackerId);
         UnitView df = stateView.getUnit(defenderId);
-        fv[1] = ((double) at.getHP())/(df.getHP() + at.getHP());
-        fv[2] = (double) Math.max(df.getXPosition() - at.getXPosition(),df.getYPosition() - at.getYPosition()) + 1000;
+        double atHP = at == null? 0 : at.getHP();
+        double dfHP = df == null? 0 : df.getHP();
+        if(atHP + dfHP == 0){ atHP = 1; }
+        fv[1] = (atHP)/(atHP + dfHP);
+        
+        if(atHP == 0 || dfHP == 0){
+        	fv[2] = 0.0;
+        }else{
+        	fv[2] = (double) Math.max(df.getXPosition() - at.getXPosition(),df.getYPosition() - at.getYPosition()) + 1000;
+        }
         
     	return fv;
     }
