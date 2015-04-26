@@ -57,7 +57,7 @@ public class RLAgent extends Agent {
      * changing them.
      */
     public final double gamma = 0.9;
-    public final double learningRate = .0001;
+    public final double learningRate = .0001*5;
     public final double epsilon = .02;
     
     public Map <Integer, Double[] > previousFeatures;
@@ -107,9 +107,11 @@ public class RLAgent extends Agent {
     @Override
     public Map<Integer, Action> initialStep(State.StateView stateView, History.HistoryView historyView) {
 
-        if( ((++episodeNum) % 5 ) % 2 == 0){
+        if( ((episodeNum++) / 5 ) % 2 == 0){
+        	System.out.println("EXPLORING in this episode.");
         	explorationEpisode = true;
         }else{
+        	System.out.println("EXPLOITING in this episode.");
         	explorationEpisode = false;
         }
 
@@ -184,7 +186,7 @@ public class RLAgent extends Agent {
         	ret.put(footmanId, Action.createCompoundAttack(footmanId, selectAction(stateView, historyView, footmanId, false)));
         	cumulativeReward.put(footmanId, -0.1);
         }
-        System.out.println(ret);
+        //System.out.println(ret);
     	return ret;
     }
 
@@ -371,13 +373,16 @@ public class RLAgent extends Agent {
     			//hadEvent.add(result.getKey());
     			if(myFootmen.contains(myUnitId)){
 	    			for(Entry<Integer, Set<Integer>> attacking : beingAttackedBy.entrySet()){
-	    				if(attacking.getValue().contains(myUnitId)){
+	    				if(attacking.getValue().contains(myUnitId) && !deadEnemies.contains(attacking.getKey())){
 	    					actions.put(myUnitId, Action.createCompoundAttack(myUnitId, attacking.getKey()));
 	    					cumulativeReward.put(myUnitId, cumulativeReward.get(myUnitId) - 0.1);
+	    				}else if(deadEnemies.contains(attacking.getKey())){
+	    					hadEvent.add(myUnitId);
+	    					inactiveUnits.add(myUnitId);
 	    				}
 	    			}
     			}else{
-    				hadEvent.add(result.getKey());
+    				hadEvent.add(myUnitId);
     			}
     			/*if(myFootmen.contains(result.getKey())){
     				inactiveUnits.add(result.getKey());
