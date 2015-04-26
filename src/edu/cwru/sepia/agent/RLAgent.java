@@ -39,7 +39,7 @@ public class RLAgent extends Agent {
     /**
      * Set this to whatever size your feature vector is.
      */
-    public static final int NUM_FEATURES = 3;
+    public static final int NUM_FEATURES = 4;
 
     /** Use this random number generator for your epsilon exploration. When you submit we will
      * change this seed so make sure that your agent works for more than the default seed.
@@ -63,6 +63,9 @@ public class RLAgent extends Agent {
     public Map <Integer, Double[] > previousFeatures;
     public Map<Integer, Double> cumulativeReward;
     public Map<Integer, Set<Integer>> beingAttackedBy;
+    
+    public int episodeNum = 0;
+    public boolean explorationEpisode;
 
     public RLAgent(int playernum, String[] args) {
         super(playernum);
@@ -87,7 +90,8 @@ public class RLAgent extends Agent {
         } else {
             // initialize weights to random values between -1 and 1
             weights = new Double[NUM_FEATURES];
-            for (int i = 0; i < weights.length; i++) {
+            weights[0] = 1.0;
+            for (int i = 1; i < weights.length; i++) {
                 weights[i] = random.nextDouble() * 2 - 1;
             }
         }
@@ -103,7 +107,11 @@ public class RLAgent extends Agent {
     @Override
     public Map<Integer, Action> initialStep(State.StateView stateView, History.HistoryView historyView) {
 
-        // You will need to add code to check if you are in a testing or learning episode
+        if( ((++episodeNum) % 5 ) % 2 == 0){
+        	explorationEpisode = true;
+        }else{
+        	explorationEpisode = false;
+        }
 
         // Find all of your units
         myFootmen = new HashSet<>();
@@ -166,14 +174,14 @@ public class RLAgent extends Agent {
     	Map<Integer, Action> ret = new HashMap<Integer, Action>();
         Set<Integer> inactiveUnits;
         if(stateView.getTurnNumber() != 0){
-        	inactiveUnits = calcRewardsAndGetInactiveUnits(stateView, historyView);
+        	inactiveUnits = calcRewardsAndGetInactiveUnits(stateView, historyView,ret);
         	
         }else{
         	inactiveUnits = new HashSet<Integer>();
         	inactiveUnits.addAll(myFootmen);
         }
         for(Integer footmanId : inactiveUnits){
-        	ret.put(footmanId, Action.createCompoundAttack(footmanId, selectAction(stateView, historyView, footmanId)));
+        	ret.put(footmanId, Action.createCompoundAttack(footmanId, selectAction(stateView, historyView, footmanId, false)));
         	cumulativeReward.put(footmanId, -0.1);
         }
         System.out.println(ret);
@@ -211,13 +219,16 @@ public class RLAgent extends Agent {
         double actualReward = cumulativeReward.get(footmanId);
         double qVal = dotProduct(weights, oldFeatures);
         
-        double predictedQ = myFootmen.contains(footmanId) ? calcQValue(stateView, historyView, footmanId, selectAction(stateView, historyView, footmanId)) : 0;
+        System.out.println("Old features: "+Arrays.toString(oldFeatures));
+        System.out.println("Reward: "+actualReward);
+        
+        double predictedQ = myFootmen.contains(footmanId) ? calcQValue(stateView, historyView, footmanId, selectAction(stateView, historyView, footmanId, true)) : 0;
         double LVal = -(actualReward - qVal + gamma*predictedQ);
         System.out.println("Old weights: "+Arrays.toString(weights));
         
         for(int i = 1; i < weights.length; i++){
         	//not sure if this is right
-        	weights[i] -= LVal/oldFeatures[i];
+        	weights[i] -= learningRate*LVal*oldFeatures[i];
         }
         System.out.println("New weights: "+Arrays.toString(weights));
         if(!myFootmen.contains(footmanId)){
@@ -236,18 +247,37 @@ public class RLAgent extends Agent {
      * @param stateView Current state of the game
      * @param historyView The entire history of this episode
      * @param attackerId The footman that will be attacking
+     * @param selectBest 
      * @return The enemy footman ID this unit should attack
      */
-    public int selectAction(State.StateView stateView, History.HistoryView historyView, int attackerId) {
-        int enemyToAttack = -1;
-        double bestQ = Double.NEGATIVE_INFINITY;
-    	for(Integer enemyId : enemyFootmen){
-        	double curQVal = calcQValue(stateView, historyView, attackerId, enemyId);
-        	if(curQVal > bestQ){
-        		bestQ = curQVal;
-        		enemyToAttack = enemyId;
-        	}
-        }
+    public int selectAction(State.StateView stateView, History.HistoryView historyView, int attackerId, boolean selectBest) {
+    	
+    	int enemyToAttack = -1;
+    	//If it is not an exploration episode, or it is an exploration episode but we decided to choose the "best" option
+    	if(selectBest || !explorationEpisode || random.nextDouble() < epsilon){
+    	
+	        double bestQ = Double.NEGATIVE_INFINITY;
+	    	for(Integer enemyId : enemyFootmen){
+	        	double curQVal = calcQValue(stateView, historyView, attackerId, enemyId);
+	        	if(curQVal > bestQ){
+	        		bestQ = curQVal;
+	        		enemyToAttack = enemyId;
+	        	}
+	        } 	
+    	}
+    	//If it is an exploration episode, and we decided not to go with the best option
+    	else{
+    		int enemyIndToAttack = random.nextInt(enemyFootmen.size());
+    		int currentInd = 0;
+    		for(Integer enemyId : enemyFootmen){
+    			if(currentInd == enemyIndToAttack){
+    				enemyToAttack = enemyId;
+    				break;
+    			}
+    			currentInd++;
+    		}
+    	}
+    	
     	previousFeatures.put(attackerId, calculateFeatureVector(stateView, historyView, attackerId, enemyToAttack));
     	if(beingAttackedBy.containsKey(enemyToAttack)){
     		beingAttackedBy.get(enemyToAttack).add(attackerId);
@@ -290,14 +320,16 @@ public class RLAgent extends Agent {
      *
      * @param stateView The current state of the game.
      * @param historyView History of the episode up until this turn.
+     * @param actions 
      * @param footmanId The footman ID you are looking for the reward from.
      * @return The current reward
      */
-    public Set<Integer> calcRewardsAndGetInactiveUnits(State.StateView stateView, History.HistoryView historyView) {
+    public Set<Integer> calcRewardsAndGetInactiveUnits(State.StateView stateView, History.HistoryView historyView, Map<Integer, Action> actions) {
     	int lastTurnNumber = stateView.getTurnNumber() -1;
     	Set<Integer> inactiveUnits = new HashSet<Integer>();
     	Set<Integer> myDead = new HashSet<Integer>();
     	Set<Integer> hadEvent = new HashSet<Integer>();
+    	Set<Integer> deadEnemies = new HashSet<Integer>();
     	for(DeathLog deathLog : historyView.getDeathLogs(lastTurnNumber)) {
     		if(deathLog.getController() == playernum){
     			int unitId = deathLog.getDeadUnitID();
@@ -312,8 +344,10 @@ public class RLAgent extends Agent {
     				//punishes footmen teaming up on others -- should make sure there is a feature to offset this
     				cumulativeReward.put(myUnit, cumulativeReward.get(myUnit) + (100.0/beingAttackedBy.get(deadEnemy).size()));
         			inactiveUnits.add(myUnit);
+        			hadEvent.add(myUnit);
     			}
     			//beingAttackedBy.remove(deadEnemy);
+    			deadEnemies.add(deadEnemy);
     		}
     	}
     	
@@ -332,14 +366,22 @@ public class RLAgent extends Agent {
     	
     	Map<Integer, ActionResult> actionResults = historyView.getCommandFeedback(playernum, lastTurnNumber);
     	for(Entry<Integer, ActionResult> result : actionResults.entrySet()) {
+    		int myUnitId = result.getKey();
     		if(result.getValue().getFeedback() == ActionFeedback.COMPLETED || result.getValue().getFeedback() == ActionFeedback.FAILED){
-    			hadEvent.add(result.getKey());
-    			for(Set<Integer> attacking : beingAttackedBy.values()){
-    				attacking.remove(result.getKey());
+    			//hadEvent.add(result.getKey());
+    			if(myFootmen.contains(myUnitId)){
+	    			for(Entry<Integer, Set<Integer>> attacking : beingAttackedBy.entrySet()){
+	    				if(attacking.getValue().contains(myUnitId)){
+	    					actions.put(myUnitId, Action.createCompoundAttack(myUnitId, attacking.getKey()));
+	    					cumulativeReward.put(myUnitId, cumulativeReward.get(myUnitId) - 0.1);
+	    				}
+	    			}
+    			}else{
+    				hadEvent.add(result.getKey());
     			}
-    			if(myFootmen.contains(result.getKey())){
+    			/*if(myFootmen.contains(result.getKey())){
     				inactiveUnits.add(result.getKey());
-    			}
+    			}*/
     		}
     	}
     	
@@ -348,6 +390,9 @@ public class RLAgent extends Agent {
     	}
     	
     	inactiveUnits.removeAll(myDead);
+    	for(Integer deadEnemy : deadEnemies){
+    		beingAttackedBy.remove(deadEnemy);
+    	}
     	
     	return inactiveUnits;
     }
@@ -406,7 +451,7 @@ public class RLAgent extends Agent {
                                            History.HistoryView historyView,
                                            int attackerId,
                                            int defenderId) {
-        Double[] fv = new Double[3];
+        Double[] fv = new Double[NUM_FEATURES];
         fv[0] = 1.0;
         
         UnitView at = stateView.getUnit(attackerId);
@@ -418,9 +463,15 @@ public class RLAgent extends Agent {
         
         if(atHP == 0 || dfHP == 0){
         	System.out.println("DEAD");
-        	fv[2] = 0.0;
+        	fv[2] = 1.0;
         }else{
-        	fv[2] = (double) Math.max(df.getXPosition() - at.getXPosition(),df.getYPosition() - at.getYPosition()) + 1000;
+        	fv[2] = (double) Math.max(df.getXPosition() - at.getXPosition(),df.getYPosition() - at.getYPosition());
+        }
+        
+        if(beingAttackedBy.get(defenderId) != null){
+        	fv[3] = 1.0*beingAttackedBy.get(defenderId).size() + 1;
+        }else{
+        	fv[3] = 1.0;
         }
         
     	return fv;
