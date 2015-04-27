@@ -41,7 +41,7 @@ public class RLAgent extends Agent {
     /**
      * Set this to whatever size your feature vector is.
      */
-    public static final int NUM_FEATURES = 4;
+    public static final int NUM_FEATURES = 2;
 
     /** Use this random number generator for your epsilon exploration. When you submit we will
      * change this seed so make sure that your agent works for more than the default seed.
@@ -60,7 +60,7 @@ public class RLAgent extends Agent {
      */
     public final double gamma = 0.9;
     public final double learningRate = .0001;
-    public /*final*/ double epsilon = 0.5;//.02;
+    public /*final*/ double epsilon = 0.02;
     
     private List<Double> rewardsFromCurrentEpisode;
     private List<Double> averageRewards;
@@ -125,10 +125,10 @@ public class RLAgent extends Agent {
 
         //if( ((episodeNum++) / 5 ) % 2 == 0){
     	if( ((episodeNum) / 5) % 3 != 0){
-        	System.out.println("EXPLORING in this episode.");
+        	//System.out.println("EXPLORING in this episode.");
         	explorationEpisode = true;
         }else{
-        	System.out.println("EXPLOITING in this episode.");
+        	//System.out.println("EXPLOITING in this episode.");
         	explorationEpisode = false;
         	lastExploit = episodeNum % 15 == 4;
         }
@@ -239,10 +239,13 @@ public class RLAgent extends Agent {
 	    		averageRewards.add(avg);
 	    		printTestData(averageRewards);
 	    		averageRewardsOverFiveEpisodes.clear();
+	    		if(avg > 63){
+	    			epsilon = 0.0;
+	    		}
 	    	}
 	    	//rewardsFromCurrentEpisode.clear();
-    	}else{
-    		epsilon = epsilon <= 0.1 ? 0 : epsilon - 0.01;
+    	}else if(episodeNum >= 25){
+    		//epsilon = epsilon <= 0.3 ? 0 : epsilon - 0.03;
     	}
     	
         // Save your weights
@@ -266,18 +269,18 @@ public class RLAgent extends Agent {
         rewardsFromCurrentEpisode.add(actualReward);
         double qVal = dotProduct(weights, oldFeatures);
         
-        System.out.println("Old features: "+Arrays.toString(oldFeatures));
-        System.out.println("Reward: "+actualReward);
+       // System.out.println("Old features: "+Arrays.toString(oldFeatures));
+        //System.out.println("Reward: "+actualReward);
         
         double predictedQ = myFootmen.contains(footmanId) ? calcQValue(stateView, historyView, footmanId, selectAction(stateView, historyView, footmanId, true)) : 0;
         double LVal = -(actualReward - qVal + gamma*predictedQ);
-        System.out.println("Old weights: "+Arrays.toString(weights));
+       // System.out.println("Old weights: "+Arrays.toString(weights));
         
         for(int i = 1; i < weights.length; i++){
         	//not sure if this is right
         	weights[i] -= learningRate*LVal*oldFeatures[i];
         }
-        System.out.println("New weights: "+Arrays.toString(weights));
+        //System.out.println("New weights: "+Arrays.toString(weights));
         if(!myFootmen.contains(footmanId)){
         	previousFeatures.remove(footmanId);
         	cumulativeReward.remove(footmanId);
@@ -543,8 +546,9 @@ public class RLAgent extends Agent {
         	fv[1] = 0.0;
         }else{
         	int chebDist = Math.max(df.getXPosition() - at.getXPosition(),df.getYPosition() - at.getYPosition());
-        	fv[1] = getDistanceIndex(at.getXPosition(), at.getYPosition(), chebDist, stateView) == 0 ? 10.0 : 0.0;
+        	fv[1] = getDistanceIndex(at.getXPosition(), at.getYPosition(), chebDist, stateView);// == 0 ? 10.0 : 0.0;
         }
+        /*
         fv[2] = justAttacked(stateView, historyView,attackerId, defenderId);
         if(beingAttackedBy.get(defenderId) != null){
         	fv[3] = 1.0*beingAttackedBy.get(defenderId).size();
