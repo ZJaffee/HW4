@@ -41,7 +41,7 @@ public class RLAgent extends Agent {
     /**
      * Set this to whatever size your feature vector is.
      */
-    public static final int NUM_FEATURES = 2;
+    public static final int NUM_FEATURES = 3;
 
     /** Use this random number generator for your epsilon exploration. When you submit we will
      * change this seed so make sure that your agent works for more than the default seed.
@@ -247,6 +247,11 @@ public class RLAgent extends Agent {
 	    		
 	    		averageRewardsOverFiveEpisodes.clear();
 	    		System.out.println("We won "+winCount+" out of 5.");
+	    		/*if(winCount >= 4 && epsilon > 0.01){
+	    			epsilon -= 0.01;
+	    		}else{
+	    			epsilon = 0.0;
+	    		}*/
 	    		winCount = 0;
 	    		/*if(avg > 63){
 	    			epsilon = 0.0;
@@ -261,6 +266,10 @@ public class RLAgent extends Agent {
     		//epsilon = epsilon <= 0.3 ? 0 : epsilon - 0.03;
     	}
     	
+    	/*if(explorationEpisode){
+    		epsilon = epsilon >= 0.05 ? epsilon - 0.05 : 0.0;
+    	}*/
+    	
     	
     	
         // Save your weights
@@ -269,7 +278,7 @@ public class RLAgent extends Agent {
     }
 
     private void updateWin() {
-    	if(myFootmen.isEmpty()){
+    	if(myFootmen.isEmpty() && !enemyFootmen.isEmpty()){
     		//System.out.println("The enemy won, with "+enemyFootmen.size()+" units left.");
     	}else{
     		//System.out.println("We won, with "+myFootmen.size()+" units left!");
@@ -362,13 +371,20 @@ public class RLAgent extends Agent {
     		}
     	}
     	
-    	previousFeatures.put(attackerId, calculateFeatureVector(stateView, historyView, attackerId, enemyToAttack));
-    	if(beingAttackedBy.containsKey(enemyToAttack)){
-    		beingAttackedBy.get(enemyToAttack).add(attackerId);
-    	}else{
-    		Set<Integer> attacking = new HashSet<Integer>();
-    		attacking.add(attackerId);
-    		beingAttackedBy.put(enemyToAttack, attacking);
+
+    	if(!selectBest){
+	    	for(Set<Integer> attackers : beingAttackedBy.values()){
+	    		attackers.remove(attackerId);
+	    	}
+	    	
+	    	previousFeatures.put(attackerId, calculateFeatureVector(stateView, historyView, attackerId, enemyToAttack));
+	    	if(beingAttackedBy.containsKey(enemyToAttack)){
+	    		beingAttackedBy.get(enemyToAttack).add(attackerId);
+	    	}else{
+	    		Set<Integer> attacking = new HashSet<Integer>();
+	    		attacking.add(attackerId);
+	    		beingAttackedBy.put(enemyToAttack, attacking);
+	    	}
     	}
     	
     	return enemyToAttack;
@@ -578,12 +594,16 @@ public class RLAgent extends Agent {
         double dfHP = df == null? 0 : df.getHP();
         if(dfHP == 0 || atHP == 0){
         	fv[1] = 0.0;
+        	fv[2] = 0.0;
+        	fv[0] = 0.0;
         	//fv[3] = 0.0;
         }else{
-        	int chebDist = Math.max(df.getXPosition() - at.getXPosition(),df.getYPosition() - at.getYPosition());
+        	int chebDist = Math.max(Math.abs(df.getXPosition() - at.getXPosition()),Math.abs(df.getYPosition() - at.getYPosition()));
         	fv[1] = getDistanceIndex(at.getXPosition(), at.getYPosition(), chebDist, stateView);// == 0 ? 10.0 : 0.0;
+        	fv[2] = mostAttacked(defenderId);//beingAttackedBy.get(defenderId) != null && beingAttackedBy.get(defenderId).isEmpty() ? -1.0 : 1.0;
         	//fv[3] = atHP/at.getTemplateView().getBaseHealth() - dfHP/df.getTemplateView().getBaseHealth();
         }
+       // System.out.println(fv[1]);
         
         //fv[2] = justAttacked(stateView, historyView,attackerId, defenderId);
         /*if(beingAttackedBy.get(defenderId) != null){
@@ -614,13 +634,29 @@ public class RLAgent extends Agent {
         }else{
         	fv[4] = 0.0;
         }
-        
-        fv[6] = justAttacked(stateView, historyView,attackerId, defenderId);*/
+        */
+        //fv[2] = justAttacked(stateView, historyView,attackerId, defenderId);
         
     	return fv;
     }
 
-    private Double justAttacked(StateView stateView, HistoryView historyView,
+    private Double mostAttacked(int defenderId) {
+		if(beingAttackedBy.get(defenderId) == null){
+			return -1.0;
+		}else{
+			int enemyMostAttacked = -1;
+			int numAttacking = Integer.MIN_VALUE;
+			for(Entry<Integer, Set<Integer>> e : beingAttackedBy.entrySet()){
+				if(e.getValue().size() > numAttacking){
+					numAttacking = e.getValue().size();
+					enemyMostAttacked = e.getKey();
+				}
+			}
+			return enemyMostAttacked == defenderId? 1.0: -1.0;
+		}
+	}
+
+	private Double justAttacked(StateView stateView, HistoryView historyView,
 			int attackerId, int defenderId) {
     	for(int i = 1; i <= 3 && stateView.getTurnNumber() - i > 0; i++){
 	    	for(DamageLog damageLog : historyView.getDamageLogs(stateView.getTurnNumber() - i)) {
@@ -628,23 +664,30 @@ public class RLAgent extends Agent {
 	    			int myUnit = damageLog.getDefenderID();
 	    			int enemyId = damageLog.getAttackerID();
 	    			if(myUnit == attackerId && enemyId == defenderId){
-	    				return -10.0;
+	    				return 1.0;
 	    			}
 	    		}
 	    	}
     	}
-    	return 0.0;
+    	return -1.0;
 	}
 
 	private Double getDistanceIndex(int x, int y, int chebDist, StateView stateView) {
-    	List<Integer> sortedByDistance = new ArrayList<Integer>();
+    	TreeSet<Integer> sortedByDistance = new TreeSet<Integer>();
     	for(Integer enemyId : enemyFootmen){
     		UnitView en = stateView.getUnit(enemyId);
-    		sortedByDistance.add(Math.max(en.getXPosition() - x,en.getYPosition() - y));
+    		sortedByDistance.add(Math.max(Math.abs(en.getXPosition()) - x,Math.abs(en.getYPosition() - y)));
     	}
     	
-    	Collections.sort(sortedByDistance);
-    	return (double) sortedByDistance.size() - sortedByDistance.indexOf(chebDist);
+    	int index = 0;
+    	for(Integer dist : sortedByDistance){
+    		if(dist == chebDist){
+    			break;
+    		}
+    		index++;
+    	}
+    	//Collections.sort(sortedByDistance);
+    	return index == 0? 1.0 : -1.0;//Math.ceil(((double) sortedByDistance.size())/2) - index;
 	}
 
 	/**
