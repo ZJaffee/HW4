@@ -41,7 +41,7 @@ public class RLAgent extends Agent {
     /**
      * Set this to whatever size your feature vector is.
      */
-    public static final int NUM_FEATURES = 3;
+    public static final int NUM_FEATURES = 2;
 
     /** Use this random number generator for your epsilon exploration. When you submit we will
      * change this seed so make sure that your agent works for more than the default seed.
@@ -468,10 +468,13 @@ public class RLAgent extends Agent {
     			}
     		}else{
     			int enemyUnit = damageLog.getDefenderID();;
-    			for(Integer myUnit : beingAttackedBy.get(enemyUnit)){
+    			int myUnit = damageLog.getAttackerID();
+    			double damage = damageLog.getDamage();
+    			cumulativeReward.put(myUnit, cumulativeReward.get(myUnit) + (damage));/*/beingAttackedBy.get(enemyUnit).size()*/
+    			//for(Integer myUnit : beingAttackedBy.get(enemyUnit)){
     				//System.out.println(cumulativeReward.get(myUnit));
-    				cumulativeReward.put(myUnit, cumulativeReward.get(myUnit) + (damageLog.getDamage()/*1.0/beingAttackedBy.get(enemyUnit).size()*/));
-    			}
+    				//cumulativeReward.put(myUnit, cumulativeReward.get(myUnit) + (damageLog.getDamage()*1.0/*/beingAttackedBy.get(enemyUnit).size()*/));
+    			//}
     		}
     	 }
     	
@@ -594,13 +597,13 @@ public class RLAgent extends Agent {
         double dfHP = df == null? 0 : df.getHP();
         if(dfHP == 0 || atHP == 0){
         	fv[1] = 0.0;
-        	fv[2] = 0.0;
+        	//fv[2] = 0.0;
         	fv[0] = 0.0;
         	//fv[3] = 0.0;
         }else{
         	int chebDist = Math.max(Math.abs(df.getXPosition() - at.getXPosition()),Math.abs(df.getYPosition() - at.getYPosition()));
         	fv[1] = getDistanceIndex(at.getXPosition(), at.getYPosition(), chebDist, stateView);// == 0 ? 10.0 : 0.0;
-        	fv[2] = mostAttacked(defenderId);//beingAttackedBy.get(defenderId) != null && beingAttackedBy.get(defenderId).isEmpty() ? -1.0 : 1.0;
+        	//fv[2] = mostAttacked(defenderId);//beingAttackedBy.get(defenderId) != null && beingAttackedBy.get(defenderId).isEmpty() ? -1.0 : 1.0;
         	//fv[3] = atHP/at.getTemplateView().getBaseHealth() - dfHP/df.getTemplateView().getBaseHealth();
         }
        // System.out.println(fv[1]);
