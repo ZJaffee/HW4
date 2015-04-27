@@ -46,7 +46,7 @@ public class RLAgent extends Agent {
     /** Use this random number generator for your epsilon exploration. When you submit we will
      * change this seed so make sure that your agent works for more than the default seed.
      */
-    public final Random random = new Random(12345);
+    public final Random random = new Random(12345678);
 
     /**
      * Your Q-function weights.
@@ -78,6 +78,8 @@ public class RLAgent extends Agent {
     
     private enum attackedByStatus {NONE, ATTACKED_BY_TARGET, NOT_ATTACKED_BY_TARGET};
     private Map<Integer, attackedByStatus> attackedBy;
+    private int winCount = 0;
+    
 
     public RLAgent(int playernum, String[] args) {
         super(playernum);
@@ -221,11 +223,15 @@ public class RLAgent extends Agent {
     @Override
     public void terminalStep(State.StateView stateView, History.HistoryView historyView) {
 
+    	removeDead(stateView, historyView);
+    	updateWin();
         // MAKE SURE YOU CALL printTestData after you finish a test episode.
     	if(!explorationEpisode){
 	    	double sum = 0.0;
 	    	for(Double d : rewardsFromCurrentEpisode){
 	    		sum += d;
+
+	    		//System.out.println("Reward: "+d);
 	    	}
 	    	//System.out.println("Sum: "+sum+"  Size:"+rewardsFromCurrentEpisode.size());
 	    	double avg = sum/rewardsFromCurrentEpisode.size();
@@ -238,22 +244,50 @@ public class RLAgent extends Agent {
 	    		avg = sum / averageRewardsOverFiveEpisodes.size();
 	    		averageRewards.add(avg);
 	    		printTestData(averageRewards);
+	    		
 	    		averageRewardsOverFiveEpisodes.clear();
-	    		if(avg > 63){
+	    		System.out.println("We won "+winCount+" out of 5.");
+	    		winCount = 0;
+	    		/*if(avg > 63){
 	    			epsilon = 0.0;
-	    		}
+	    		}*/
 	    	}
 	    	//rewardsFromCurrentEpisode.clear();
-    	}else if(episodeNum >= 25){
+    	}else if(((episodeNum) / 5) % 3 == 0){
+    		System.out.println("We won "+winCount+" out of 10.");
+    		winCount = 0;
+    	}
+    	else if(episodeNum >= 25){
     		//epsilon = epsilon <= 0.3 ? 0 : epsilon - 0.03;
     	}
+    	
+    	
     	
         // Save your weights
         saveWeights(weights);
 
     }
 
-    /**
+    private void updateWin() {
+    	if(myFootmen.isEmpty()){
+    		//System.out.println("The enemy won, with "+enemyFootmen.size()+" units left.");
+    	}else{
+    		//System.out.println("We won, with "+myFootmen.size()+" units left!");
+    		winCount++;
+    	}
+	}
+
+	private void removeDead(StateView stateView, HistoryView historyView) {
+    	for(DeathLog deathLog : historyView.getDeathLogs(stateView.getTurnNumber() - 1)) {
+    		if(deathLog.getController() == playernum){
+    			myFootmen.remove(deathLog.getDeadUnitID());
+    		}else{
+    			enemyFootmen.remove(deathLog.getDeadUnitID());
+    		}
+    	}
+	}
+
+	/**
      * Calculate the updated weights for this agent. 
      * @param oldWeights Weights prior to update
      * @param oldFeatures Features from (s,a)
@@ -544,13 +578,15 @@ public class RLAgent extends Agent {
         double dfHP = df == null? 0 : df.getHP();
         if(dfHP == 0 || atHP == 0){
         	fv[1] = 0.0;
+        	//fv[3] = 0.0;
         }else{
         	int chebDist = Math.max(df.getXPosition() - at.getXPosition(),df.getYPosition() - at.getYPosition());
         	fv[1] = getDistanceIndex(at.getXPosition(), at.getYPosition(), chebDist, stateView);// == 0 ? 10.0 : 0.0;
+        	//fv[3] = atHP/at.getTemplateView().getBaseHealth() - dfHP/df.getTemplateView().getBaseHealth();
         }
-        /*
-        fv[2] = justAttacked(stateView, historyView,attackerId, defenderId);
-        if(beingAttackedBy.get(defenderId) != null){
+        
+        //fv[2] = justAttacked(stateView, historyView,attackerId, defenderId);
+        /*if(beingAttackedBy.get(defenderId) != null){
         	fv[3] = 1.0*beingAttackedBy.get(defenderId).size();
         }else{
         	fv[3] = 0.0;
@@ -568,9 +604,9 @@ public class RLAgent extends Agent {
         }
         
         if(beingAttackedBy.get(defenderId) != null){
-        	fv[3] = 1.0*beingAttackedBy.get(defenderId).size();
+        	fv[2] = 1.0*beingAttackedBy.get(defenderId).size();
         }else{
-        	fv[3] = 0.0;
+        	fv[2] = 0.0;
         }
         
         if(dfHP!=0){
@@ -586,14 +622,16 @@ public class RLAgent extends Agent {
 
     private Double justAttacked(StateView stateView, HistoryView historyView,
 			int attackerId, int defenderId) {
-    	for(DamageLog damageLog : historyView.getDamageLogs(stateView.getTurnNumber() - 1)) {
-    		if(damageLog.getDefenderController() == playernum){
-    			int myUnit = damageLog.getDefenderID();
-    			int enemyId = damageLog.getAttackerID();
-    			if(myUnit == attackerId && enemyId == defenderId){
-    				return 10.0;
-    			}
-    		}
+    	for(int i = 1; i <= 3 && stateView.getTurnNumber() - i > 0; i++){
+	    	for(DamageLog damageLog : historyView.getDamageLogs(stateView.getTurnNumber() - i)) {
+	    		if(damageLog.getDefenderController() == playernum){
+	    			int myUnit = damageLog.getDefenderID();
+	    			int enemyId = damageLog.getAttackerID();
+	    			if(myUnit == attackerId && enemyId == defenderId){
+	    				return -10.0;
+	    			}
+	    		}
+	    	}
     	}
     	return 0.0;
 	}
@@ -606,7 +644,7 @@ public class RLAgent extends Agent {
     	}
     	
     	Collections.sort(sortedByDistance);
-    	return (double) sortedByDistance.size() - sortedByDistance.indexOf(chebDist) - 1;
+    	return (double) sortedByDistance.size() - sortedByDistance.indexOf(chebDist);
 	}
 
 	/**
