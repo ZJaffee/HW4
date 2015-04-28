@@ -60,25 +60,36 @@ public class RLAgent extends Agent {
      */
     public final double gamma = 0.9;
     public final double learningRate = .0001;
+    //We decided not to make epsilon final because we wanted to set it to 0.0 after the agent wins 5/5 times
     public /*final*/ double epsilon = 0.02;
     
+    //Variables about this episode or groups of episodes
+    //The rewards from this episode
     private List<Double> rewardsFromCurrentEpisode;
+    //The overall average rewards of the groups of 5 exploit episodes
     private List<Double> averageRewards;
+    //The average rewards from each episode in a group of 5 exploit episodes
     private List<Double> averageRewardsOverFiveEpisodes;
+    //Whether or not this is the last exploit eppisode in a group of 5
     private boolean lastExploit = false;
+    //The episode number
+    public int episodeNum = 0;
+    //Whether this is an explore or exploit episode
+    public boolean explorationEpisode;
+    //# of episodes won in this group of 10 or 5 episodes
+    private int winCount = 0;
     
+    //The most recent feature vectors from each footman
     public Map <Integer, Double[] > previousFeatures;
+    //The reward of each footmen from its most recent action -- accumulates until event
     public Map<Integer, Double> cumulativeReward;
+    //Maps an ememy id to the set of footmen ids which are attacking that enemy
     public Map<Integer, Set<Integer>> beingAttackedBy;
     
-    public int episodeNum = 0;
-    public boolean explorationEpisode;
-    
-    public Map<Integer, Integer> lastAssignedAMove;
-    
+    //We keep track of whether not not a unit was not attacked at all (NONE), was attacked by their target, or
+    // was not attacked by their target but was attacked.
     private enum attackedByStatus {NONE, ATTACKED_BY_TARGET, NOT_ATTACKED_BY_TARGET};
     private Map<Integer, attackedByStatus> attackedBy;
-    private int winCount = 0;
     
 
     public RLAgent(int playernum, String[] args) {
@@ -104,16 +115,16 @@ public class RLAgent extends Agent {
         } else {
             // initialize weights to random values between -1 and 1
             weights = new Double[NUM_FEATURES];
-            weights[0] = 1.0;
-            for (int i = 1; i < weights.length; i++) {
+            
+            for (int i = 0; i < weights.length; i++) {
                 weights[i] = random.nextDouble() * 2 - 1;
             }
         }
         
+        //Initialize variables
         cumulativeReward = new HashMap<Integer, Double>();
         previousFeatures = new HashMap<Integer, Double[]>();
         beingAttackedBy = new HashMap<Integer, Set<Integer>>();
-        lastAssignedAMove = new HashMap<Integer, Integer>();
         attackedBy = new HashMap<Integer, attackedByStatus>();
         averageRewards = new ArrayList<Double>();
         averageRewardsOverFiveEpisodes = new ArrayList<Double>();
@@ -125,12 +136,11 @@ public class RLAgent extends Agent {
     @Override
     public Map<Integer, Action> initialStep(State.StateView stateView, History.HistoryView historyView) {
 
-        //if( ((episodeNum++) / 5 ) % 2 == 0){
+    	//We start out with 5 exploit (no weight-updating) epsidoes, then 10 explore, then 5 exploit etc
+    	//This is just some mod/divide stuff to get the values right
     	if( ((episodeNum) / 5) % 3 != 0){
-        	//System.out.println("EXPLORING in this episode.");
         	explorationEpisode = true;
         }else{
-        	//System.out.println("EXPLOITING in this episode.");
         	explorationEpisode = false;
         	lastExploit = episodeNum % 15 == 4;
         }
@@ -198,19 +208,40 @@ public class RLAgent extends Agent {
     public Map<Integer, Action> middleStep(State.StateView stateView, History.HistoryView historyView) {
     	Map<Integer, Action> ret = new HashMap<Integer, Action>();
         Set<Integer> inactiveUnits;
+        
+        //If its not the first turn
         if(stateView.getTurnNumber() != 0){
-        	inactiveUnits = calcRewardsAndGetInactiveUnits(stateView, historyView,ret);
-        	
+        	//accumulate and update rewrads and get the inactive units
+        	inactiveUnits = calcRewardsAndGetInactiveUnits(stateView, historyView);
         }else{
+        	//Otherwise, its the beginning of the game, and all units are inactive
         	inactiveUnits = new HashSet<Integer>();
         	inactiveUnits.addAll(myFootmen);
         }
+        //For each inactive unit
         for(Integer footmanId : inactiveUnits){
-        	ret.put(footmanId, Action.createCompoundAttack(footmanId, selectAction(stateView, historyView, footmanId, false)));
+        	//Make an action to attack the unit returned from selectAction
+        	int enemyToAttack = selectAction(stateView, historyView, footmanId, false);
+        	ret.put(footmanId, Action.createCompoundAttack(footmanId, enemyToAttack));
+        	//The reward begins at -0.1
         	cumulativeReward.put(footmanId, -0.1);
-        	lastAssignedAMove.put(footmanId, 0);
+        	
+        	//Remember the features from this action
+	    	previousFeatures.put(footmanId, calculateFeatureVector(stateView, historyView, footmanId, enemyToAttack));
+        	//This unit is no longer attacking whoever it was previously, so remove it from beingAttackedBy
+        	for(Set<Integer> attackers : beingAttackedBy.values()){
+	    		attackers.remove(footmanId);
+	    	}
+	    	
+        	//Now, add this unit to beingAttackedBy to the unit it is attacking
+	    	if(beingAttackedBy.containsKey(enemyToAttack)){
+	    		beingAttackedBy.get(enemyToAttack).add(footmanId);
+	    	}else{
+	    		Set<Integer> attacking = new HashSet<Integer>();
+	    		attacking.add(footmanId);
+	    		beingAttackedBy.put(enemyToAttack, attacking);
+	    	}
         }
-        //System.out.println(ret);
     	return ret;
     }
 
@@ -222,76 +253,84 @@ public class RLAgent extends Agent {
      */
     @Override
     public void terminalStep(State.StateView stateView, History.HistoryView historyView) {
-
+    	
+    	//Remove the dead and update winCount
     	removeDead(stateView, historyView);
     	updateWin();
-        // MAKE SURE YOU CALL printTestData after you finish a test episode.
+    	
+    	//If this was an exploit episode
     	if(!explorationEpisode){
+    		//Calculate the average reward from this episode
 	    	double sum = 0.0;
 	    	for(Double d : rewardsFromCurrentEpisode){
 	    		sum += d;
-
-	    		//System.out.println("Reward: "+d);
 	    	}
-	    	//System.out.println("Sum: "+sum+"  Size:"+rewardsFromCurrentEpisode.size());
 	    	double avg = sum/rewardsFromCurrentEpisode.size();
+	    	rewardsFromCurrentEpisode.clear();
+	    	
+	    	//Add the average to the list of averages from this group of exploits
 	    	averageRewardsOverFiveEpisodes.add(avg);
+	    	//If this is the last (5th) exploit episode, we have to print test data
 	    	if(lastExploit){
+	    		//Calculate the average of the averages
 	    		sum = 0.0;
 	    		for(Double d : averageRewardsOverFiveEpisodes){
 		    		sum += d;
 		    	}
 	    		avg = sum / averageRewardsOverFiveEpisodes.size();
 	    		averageRewards.add(avg);
+	    		
+	    		//And print
 	    		printTestData(averageRewards);
 	    		
 	    		averageRewardsOverFiveEpisodes.clear();
 	    		System.out.println("We won "+winCount+" out of 5.");
-	    		/*if(winCount >= 4 && epsilon > 0.01){
-	    			epsilon -= 0.01;
-	    		}else{
-	    			epsilon = 0.0;
-	    		}*/
 	    		winCount = 0;
-	    		/*if(avg > 63){
-	    			epsilon = 0.0;
-	    		}*/
+
+	            //Print the weights
+	            System.out.println("Weight vector: "+Arrays.toString(weights));
 	    	}
-	    	//rewardsFromCurrentEpisode.clear();
-    	}else if(((episodeNum) / 5) % 3 == 0){
+    	}
+    	//If this is the last exploration episode, print how many we won
+    	else if(((episodeNum) / 5) % 3 == 0){
     		System.out.println("We won "+winCount+" out of 10.");
     		winCount = 0;
     	}
-    	else if(episodeNum >= 25){
-    		//epsilon = epsilon <= 0.3 ? 0 : epsilon - 0.03;
-    	}
-    	
-    	/*if(explorationEpisode){
-    		epsilon = epsilon >= 0.05 ? epsilon - 0.05 : 0.0;
-    	}*/
-    	
-    	
-    	
         // Save your weights
         saveWeights(weights);
 
     }
 
+    //Increment the win count if we won
     private void updateWin() {
-    	if(myFootmen.isEmpty() && !enemyFootmen.isEmpty()){
-    		//System.out.println("The enemy won, with "+enemyFootmen.size()+" units left.");
-    	}else{
-    		//System.out.println("We won, with "+myFootmen.size()+" units left!");
+    	//If we did not lose (we have no footmen, and they have at least 1), then we won!
+    	if(!(myFootmen.isEmpty() && !enemyFootmen.isEmpty())){
     		winCount++;
     	}
 	}
 
+    //Remove dead units from our unit list, also accumlate rewards and add them to the reward list
 	private void removeDead(StateView stateView, HistoryView historyView) {
     	for(DeathLog deathLog : historyView.getDeathLogs(stateView.getTurnNumber() - 1)) {
+    		//If this dead unit is ours
     		if(deathLog.getController() == playernum){
+    			//Remove it from out list of units
     			myFootmen.remove(deathLog.getDeadUnitID());
-    		}else{
+    			//Subtract 100 from their reward
+    			cumulativeReward.put(deathLog.getDeadUnitID(), cumulativeReward.get(deathLog.getDeadUnitID()) - 100.0 );
+    			//Add the reward to this episodes rewards
+    			rewardsFromCurrentEpisode.add(cumulativeReward.get(deathLog.getDeadUnitID()));
+    		}
+    		//If this dead unit is theirs
+    		else{
+    			//Remove them from the list of enemies
     			enemyFootmen.remove(deathLog.getDeadUnitID());
+    			int deadEnemy = deathLog.getDeadUnitID();
+    			for(Integer myUnit : beingAttackedBy.get(deadEnemy)){
+    				//Reward each unit that was attacking them, and add the reward to the list of rewards
+    				cumulativeReward.put(myUnit, cumulativeReward.get(myUnit) + 100.0);
+    				rewardsFromCurrentEpisode.add(cumulativeReward.get(myUnit));
+    			}
     		}
     	}
 	}
@@ -307,24 +346,29 @@ public class RLAgent extends Agent {
      * @return The updated weight vector.
      */
     public void updateWeights(State.StateView stateView, History.HistoryView historyView, int footmanId) {
+    	//Get the previous features from the proposed action of this footman
         Double[] oldFeatures = previousFeatures.get(footmanId);
-        double actualReward = cumulativeReward.get(footmanId);
-        rewardsFromCurrentEpisode.add(actualReward);
+        //Calculate the old q value
         double qVal = dotProduct(weights, oldFeatures);
+        //Get the accumulated actual reward from this footman
+        double actualReward = cumulativeReward.get(footmanId);
+        //Add those rewards to the list of rewards from this episode
+        rewardsFromCurrentEpisode.add(actualReward);
         
-       // System.out.println("Old features: "+Arrays.toString(oldFeatures));
-        //System.out.println("Reward: "+actualReward);
-        
+        //Calculate Q' -- the max next q value, which is 0 if the unit died
         double predictedQ = myFootmen.contains(footmanId) ? calcQValue(stateView, historyView, footmanId, selectAction(stateView, historyView, footmanId, true)) : 0;
+        //Calculate dL/dw (feature function omitted here, multiplied later)
         double LVal = -(actualReward - qVal + gamma*predictedQ);
-       // System.out.println("Old weights: "+Arrays.toString(weights));
         
-        for(int i = 1; i < weights.length; i++){
-        	//not sure if this is right
+        //For each feature/weight
+        for(int i = 0; i < weights.length; i++){
+        	//update the weight according to the info in the slide
         	weights[i] -= learningRate*LVal*oldFeatures[i];
         }
-        //System.out.println("New weights: "+Arrays.toString(weights));
+        
+        //If this footman died
         if(!myFootmen.contains(footmanId)){
+        	//Remove the footman from the previous features map, the reward map, and the being attacked by map
         	previousFeatures.remove(footmanId);
         	cumulativeReward.remove(footmanId);
         	for(Set<Integer> myUnits : beingAttackedBy.values()){
@@ -340,15 +384,16 @@ public class RLAgent extends Agent {
      * @param stateView Current state of the game
      * @param historyView The entire history of this episode
      * @param attackerId The footman that will be attacking
-     * @param selectBest 
+     * @param calcQPrime 
      * @return The enemy footman ID this unit should attack
      */
-    public int selectAction(State.StateView stateView, History.HistoryView historyView, int attackerId, boolean selectBest) {
+    public int selectAction(State.StateView stateView, History.HistoryView historyView, int attackerId, boolean calcQPrime) {
     	
     	int enemyToAttack = -1;
-    	//If it is not an exploration episode, or it is an exploration episode but we decided to choose the "best" option
-    	if(selectBest || !explorationEpisode || random.nextDouble() >= epsilon){
-    	
+    	//If it is not an exploration episode, or it is an exploration episode but we decided to choose the "best" option, or we are calculating Q'
+    	if(calcQPrime || !explorationEpisode || random.nextDouble() >= epsilon){
+    		
+    		//Get the highest Q value by checking the q value for each possible enemy to attack
 	        double bestQ = Double.NEGATIVE_INFINITY;
 	    	for(Integer enemyId : enemyFootmen){
 	        	double curQVal = calcQValue(stateView, historyView, attackerId, enemyId);
@@ -358,8 +403,9 @@ public class RLAgent extends Agent {
 	        	}
 	        } 	
     	}
-    	//If it is an exploration episode, and we decided not to go with the best option
+    	//If it is an exploration episode, and we decided not to go with the best option (epsilon randomness)
     	else{
+    		//Pick a random enemy to attack
     		int enemyIndToAttack = random.nextInt(enemyFootmen.size());
     		int currentInd = 0;
     		for(Integer enemyId : enemyFootmen){
@@ -369,22 +415,6 @@ public class RLAgent extends Agent {
     			}
     			currentInd++;
     		}
-    	}
-    	
-
-    	if(!selectBest){
-	    	for(Set<Integer> attackers : beingAttackedBy.values()){
-	    		attackers.remove(attackerId);
-	    	}
-	    	
-	    	previousFeatures.put(attackerId, calculateFeatureVector(stateView, historyView, attackerId, enemyToAttack));
-	    	if(beingAttackedBy.containsKey(enemyToAttack)){
-	    		beingAttackedBy.get(enemyToAttack).add(attackerId);
-	    	}else{
-	    		Set<Integer> attacking = new HashSet<Integer>();
-	    		attacking.add(attackerId);
-	    		beingAttackedBy.put(enemyToAttack, attacking);
-	    	}
     	}
     	
     	return enemyToAttack;
@@ -424,116 +454,132 @@ public class RLAgent extends Agent {
      * @param footmanId The footman ID you are looking for the reward from.
      * @return The current reward
      */
-    public Set<Integer> calcRewardsAndGetInactiveUnits(State.StateView stateView, History.HistoryView historyView, Map<Integer, Action> actions) {
+    public Set<Integer> calcRewardsAndGetInactiveUnits(State.StateView stateView, History.HistoryView historyView) {
+    	//Get the last turn #
     	int lastTurnNumber = stateView.getTurnNumber() -1;
+    	//The set of newly inactive units
     	Set<Integer> inactiveUnits = new HashSet<Integer>();
-    	Set<Integer> myDead = new HashSet<Integer>();
+    	//The set of units which had an event at this step
     	Set<Integer> hadEvent = new HashSet<Integer>();
+    	//The set of my dead units
+    	Set<Integer> myDead = new HashSet<Integer>();
+    	//The set of dead enemies
     	Set<Integer> deadEnemies = new HashSet<Integer>();
+    	
+    	//Go through each deathLog
     	for(DeathLog deathLog : historyView.getDeathLogs(lastTurnNumber)) {
+    		//If my player died
     		if(deathLog.getController() == playernum){
+    			//Then this unit had an event, and we remove/add them from appropriate lists
     			int unitId = deathLog.getDeadUnitID();
     			hadEvent.add(unitId);
     			myFootmen.remove(deathLog.getDeadUnitID());
     			myDead.add(deathLog.getDeadUnitID());
-    			lastAssignedAMove.remove(unitId);
+    			//Subtract 100 from the reward
     			cumulativeReward.put(unitId, cumulativeReward.get(unitId) - 100);
-    		}else{
+    		}
+    		//If the dead unit is an enemy
+    		else{
+    			//We remove/add to appproriate lists
     			int deadEnemy = deathLog.getDeadUnitID();
     			enemyFootmen.remove(deadEnemy);
+    			//And we reward every unit that was attacking it by 100
     			for(Integer myUnit : beingAttackedBy.get(deadEnemy)){
-    				//punishes footmen teaming up on others -- should make sure there is a feature to offset this
+    				//Originally, we discounted the reward by dividing the 100 reward by the number of footmen attacking the enemy
+    				//However, this did not fare well because it punishes coordination
+    				//Currently, this rewards coordination, and works better.
     				cumulativeReward.put(myUnit, cumulativeReward.get(myUnit) + (100.0/*/beingAttackedBy.get(deadEnemy).size()*/));
         			inactiveUnits.add(myUnit);
         			hadEvent.add(myUnit);
     			}
-    			//beingAttackedBy.remove(deadEnemy);
     			deadEnemies.add(deadEnemy);
     		}
     	}
     	
-    	
+    	//Set each footman's attackedBy status to NONE
     	for(Integer myUnit : myFootmen){
     		attackedBy.put(myUnit, attackedByStatus.NONE);
     	}
+    	//Loop through each damage log
     	for(DamageLog damageLog : historyView.getDamageLogs(lastTurnNumber)) {
+    		//If my player got damaged
     		if(damageLog.getDefenderController() == playernum){
+    			//Update rewards accordingly
     			int myUnit = damageLog.getDefenderID();
     			int enemyId = damageLog.getAttackerID();
     			cumulativeReward.put(myUnit, cumulativeReward.get(myUnit) - damageLog.getDamage());
+    			
+    			//If the attacker was the target of the footman, set the status to ATTACKED_BY_TARGET
     			if(beingAttackedBy.get(enemyId) != null && beingAttackedBy.get(enemyId).contains(myUnit)){
     				attackedBy.put(myUnit, attackedByStatus.ATTACKED_BY_TARGET);
-    			}else if(attackedBy.get(myUnit) == attackedByStatus.NONE){
+    			}
+    			//Otherwise, if the status is still NONE, then it was NOT_ATTACKED_BY_TARGET
+    			else if(attackedBy.get(myUnit) == attackedByStatus.NONE){
     				attackedBy.put(myUnit, attackedByStatus.NOT_ATTACKED_BY_TARGET);
     			}
-    		}else{
-    			int enemyUnit = damageLog.getDefenderID();;
+    		}
+    		//If the attacked unit was the enemy
+    		else{
     			int myUnit = damageLog.getAttackerID();
     			double damage = damageLog.getDamage();
-    			cumulativeReward.put(myUnit, cumulativeReward.get(myUnit) + (damage));/*/beingAttackedBy.get(enemyUnit).size()*/
-    			//for(Integer myUnit : beingAttackedBy.get(enemyUnit)){
-    				//System.out.println(cumulativeReward.get(myUnit));
-    				//cumulativeReward.put(myUnit, cumulativeReward.get(myUnit) + (damageLog.getDamage()*1.0/*/beingAttackedBy.get(enemyUnit).size()*/));
-    			//}
+    			//Reward the attacker
+    			cumulativeReward.put(myUnit, cumulativeReward.get(myUnit) + damage);
     		}
     	 }
     	
+    	//Go through each ActionResult
     	Map<Integer, ActionResult> actionResults = historyView.getCommandFeedback(playernum, lastTurnNumber);
     	for(Entry<Integer, ActionResult> result : actionResults.entrySet()) {
     		int myUnitId = result.getKey();
+    		//If the action was completed or failed
     		if(result.getValue().getFeedback() == ActionFeedback.COMPLETED || result.getValue().getFeedback() == ActionFeedback.FAILED){
-    			//hadEvent.add(result.getKey());
+    			//If the unit is still alive
     			if(myFootmen.contains(myUnitId)){
-	    			for(Entry<Integer, Set<Integer>> attacking : beingAttackedBy.entrySet()){
-	    				if(attacking.getValue().contains(myUnitId) && !deadEnemies.contains(attacking.getKey())){
-	    					actions.put(myUnitId, Action.createCompoundAttack(myUnitId, attacking.getKey()));
-	    					cumulativeReward.put(myUnitId, cumulativeReward.get(myUnitId) - 0.1);
-	    				}else if(deadEnemies.contains(attacking.getKey())){
-	    					hadEvent.add(myUnitId);
-	    					inactiveUnits.add(myUnitId);
-	    				}
-	    			}
-    			}else{
+    				//then they had an event and can be considered inactive
+					hadEvent.add(myUnitId);
+					inactiveUnits.add(myUnitId);
+    			}
+    			//If the unit is dead, they had an event, but are not "inactive" because they cannot be assigned a move
+    			else{
     				hadEvent.add(myUnitId);
     			}
-    			/*if(myFootmen.contains(result.getKey())){
-    				inactiveUnits.add(result.getKey());
-    			}*/
     		}
     	}
     	
-    	/*for(Entry<Integer, Integer> assignedMoves : lastAssignedAMove.entrySet()){
-    		if(assignedMoves.getValue() >= 12){
-    			hadEvent.add(assignedMoves.getKey());
-    			inactiveUnits.add(assignedMoves.getKey());
-    		}else{
-    			lastAssignedAMove.put(assignedMoves.getKey(), assignedMoves.getValue() + 1);
-    		}
-    	}*/
-    	
+    	//For each footmen who has the NOT_ATTACKED_BY_TARGET status, they had an event and are inactive
     	for(Integer myUnit : myFootmen){
     		if(attackedBy.get(myUnit) == attackedByStatus.NOT_ATTACKED_BY_TARGET){
     			inactiveUnits.add(myUnit);
     			hadEvent.add(myUnit);
     		}
     	}
+    	
+    	//If this is an exploration episode
     	if(explorationEpisode){
+    		//We update the weights for each unit which had an event
 	    	for(Integer unitHadEvent : hadEvent){
 	    		updateWeights(stateView, historyView, unitHadEvent);
 	    	}
-	    }else{
+	    }
+    	//Otherwise
+    	else{
+    		//We keep track of the reward and do not update the weights
 	    	for(Integer unitHadEvent : hadEvent){
 	    		rewardsFromCurrentEpisode.add(cumulativeReward.get(unitHadEvent));
 	    	}
 	    }
+    	//Make sure no dead units are being returned 
     	inactiveUnits.removeAll(myDead);
+    	//Also make sure no dead units remain in the beingAttackedBy map
     	for(Integer deadEnemy : deadEnemies){
     		beingAttackedBy.remove(deadEnemy);
     	}
     	
+    	//Return the inactive units
     	return inactiveUnits;
     }
     
+    //Calculate the dot product of two 1D matrices
     public double dotProduct(Double[] a, Double[] b){
 		if(a.length != b.length){
 			throw new IllegalArgumentException("The dimensions have to be equal!");
@@ -588,26 +634,31 @@ public class RLAgent extends Agent {
                                            History.HistoryView historyView,
                                            int attackerId,
                                            int defenderId) {
-        Double[] fv = new Double[NUM_FEATURES];
+        //The first feature is just 1
+    	Double[] fv = new Double[NUM_FEATURES];
         fv[0] = 1.0;
         
         UnitView at = stateView.getUnit(attackerId);
         UnitView df = stateView.getUnit(defenderId);
-        double atHP = at == null? 0 : at.getHP();
-        double dfHP = df == null? 0 : df.getHP();
-        if(dfHP == 0 || atHP == 0){
+        if(at == null || df == null){
         	fv[1] = 0.0;
-        	//fv[2] = 0.0;
         	fv[0] = 0.0;
-        	//fv[3] = 0.0;
         }else{
         	int chebDist = Math.max(Math.abs(df.getXPosition() - at.getXPosition()),Math.abs(df.getYPosition() - at.getYPosition()));
-        	fv[1] = getDistanceIndex(at.getXPosition(), at.getYPosition(), chebDist, stateView);// == 0 ? 10.0 : 0.0;
-        	//fv[2] = mostAttacked(defenderId);//beingAttackedBy.get(defenderId) != null && beingAttackedBy.get(defenderId).isEmpty() ? -1.0 : 1.0;
-        	//fv[3] = atHP/at.getTemplateView().getBaseHealth() - dfHP/df.getTemplateView().getBaseHealth();
+        	fv[1] = isClosestEnemy(at.getXPosition(), at.getYPosition(), chebDist, stateView);
         }
-       // System.out.println(fv[1]);
         
+        //Below is lots of our attempts at different features
+        //NOTE: fv[1] is the ONLY feature we found to make any significant improvement over gameplay
+        //  hence, we commented out all other features
+        
+        //We tried things like health comparisons, the # of units who are attacking that enemy,
+        //whether or not that enemy attacked this footman recently (see justAttacked).
+        //whether or not the enemy is currently being attacked by the most footmen
+        //and probably some others I forgot
+        
+    	//fv[2] = mostAttacked(defenderId);//beingAttackedBy.get(defenderId) != null && beingAttackedBy.get(defenderId).isEmpty() ? -1.0 : 1.0;
+    	//fv[3] = atHP/at.getTemplateView().getBaseHealth() - dfHP/df.getTemplateView().getBaseHealth();
         //fv[2] = justAttacked(stateView, historyView,attackerId, defenderId);
         /*if(beingAttackedBy.get(defenderId) != null){
         	fv[3] = 1.0*beingAttackedBy.get(defenderId).size();
@@ -643,6 +694,7 @@ public class RLAgent extends Agent {
     	return fv;
     }
 
+    //Returns whether or not the given defender is currently the target of the most footmen
     private Double mostAttacked(int defenderId) {
 		if(beingAttackedBy.get(defenderId) == null){
 			return -1.0;
@@ -659,6 +711,7 @@ public class RLAgent extends Agent {
 		}
 	}
 
+    //Returns whether or not this unit has been attacked by this enemy in the last 3 steps
 	private Double justAttacked(StateView stateView, HistoryView historyView,
 			int attackerId, int defenderId) {
     	for(int i = 1; i <= 3 && stateView.getTurnNumber() - i > 0; i++){
@@ -675,22 +728,19 @@ public class RLAgent extends Agent {
     	return -1.0;
 	}
 
-	private Double getDistanceIndex(int x, int y, int chebDist, StateView stateView) {
+	//Returns 1 if the given chebDist is the closest distance of all enemies, -1.0 otherwise
+	//x is the x coordinate of this footman, y is the y coordinate, chebDist is the Chebyshev distance of the enemy in question
+	private Double isClosestEnemy(int x, int y, int chebDist, StateView stateView) {
+		//We use a treeset because it preserves sorted order, but also does not have duplicates
     	TreeSet<Integer> sortedByDistance = new TreeSet<Integer>();
+    	//Get the chebyshec distances for each enemy
     	for(Integer enemyId : enemyFootmen){
     		UnitView en = stateView.getUnit(enemyId);
     		sortedByDistance.add(Math.max(Math.abs(en.getXPosition()) - x,Math.abs(en.getYPosition() - y)));
     	}
     	
-    	int index = 0;
-    	for(Integer dist : sortedByDistance){
-    		if(dist == chebDist){
-    			break;
-    		}
-    		index++;
-    	}
-    	//Collections.sort(sortedByDistance);
-    	return index == 0? 1.0 : -1.0;//Math.ceil(((double) sortedByDistance.size())/2) - index;
+    	//If the first distance is the chebDist, return 1.0, or -1.0 otherwise
+    	return sortedByDistance.pollFirst() == chebDist ? 1.0 : -1.0;
 	}
 
 	/**
